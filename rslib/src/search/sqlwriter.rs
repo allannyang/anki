@@ -339,9 +339,11 @@ impl SqlWriter<'_> {
     }
 
     fn write_rated(&mut self, op: &str, days: i64, ease: &RatingKind) -> Result<()> {
-        let today_cutoff = self.col.timing_today()?.next_day_at;
-        let target_cutoff_ms = today_cutoff.adding_secs(86_400 * days).as_millis();
-        let day_before_cutoff_ms = today_cutoff.adding_secs(86_400 * (days - 1)).as_millis();
+        // reviews can't predate 1970, so there's no need to look further back
+        let days = days.max(-100 * 365) as i32;
+        let day_starts = self.col.day_starts(days..=days + 1)?;
+        let target_cutoff_ms = day_starts[1].as_millis();
+        let day_before_cutoff_ms = day_starts[0].as_millis();
 
         write!(self.sql, "c.id in (select cid from revlog where id").unwrap();
 
@@ -1363,18 +1365,20 @@ mod test {
         );
 
         // rated
+        let yesterday_start = ctx.day_starts(-1..=-1).unwrap()[0];
         assert_eq!(
             s(ctx, "rated:2").0,
             format!(
                 "(c.id in (select cid from revlog where id >= {} and ease > 0))",
-                (timing.next_day_at.0 - (86_400 * 2)) * 1_000
+                yesterday_start.0 * 1_000
             )
         );
+        let start_399_days_ago = ctx.day_starts(-399..=-399).unwrap()[0];
         assert_eq!(
             s(ctx, "rated:400:1").0,
             format!(
                 "(c.id in (select cid from revlog where id >= {} and ease = 1))",
-                (timing.next_day_at.0 - (86_400 * 400)) * 1_000
+                start_399_days_ago.0 * 1_000
             )
         );
         assert_eq!(s(ctx, "rated:0").0, s(ctx, "rated:1").0);
@@ -1384,7 +1388,7 @@ mod test {
             s(ctx, "resched:400").0,
             format!(
                 "(c.id in (select cid from revlog where id >= {} and ease = 0))",
-                (timing.next_day_at.0 - (86_400 * 400)) * 1_000
+                start_399_days_ago.0 * 1_000
             )
         );
 

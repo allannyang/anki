@@ -4,6 +4,12 @@
 #![cfg(test)]
 #![allow(dead_code)]
 
+use chrono::Duration;
+use chrono::FixedOffset;
+use chrono::MappedLocalTime;
+use chrono::NaiveDate;
+use chrono::NaiveDateTime;
+use chrono::TimeZone;
 use itertools::Itertools;
 use tempfile::tempdir;
 use tempfile::TempDir;
@@ -270,5 +276,63 @@ impl CardAdder {
         }
 
         col.storage.all_cards_of_note(note.id).unwrap()
+    }
+}
+
+/// Eastern time in 2026, where clocks spring forward at 2am on Mar 8 and fall
+/// back at 2am on Nov 1.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Eastern2026;
+
+impl Eastern2026 {
+    pub(crate) fn est() -> FixedOffset {
+        FixedOffset::west_opt(5 * 3600).unwrap()
+    }
+
+    pub(crate) fn edt() -> FixedOffset {
+        FixedOffset::west_opt(4 * 3600).unwrap()
+    }
+}
+
+impl TimeZone for Eastern2026 {
+    type Offset = FixedOffset;
+
+    fn from_offset(_offset: &FixedOffset) -> Self {
+        Eastern2026
+    }
+
+    fn offset_from_local_date(&self, local: &NaiveDate) -> MappedLocalTime<FixedOffset> {
+        self.offset_from_local_datetime(&local.and_hms_opt(0, 0, 0).unwrap())
+    }
+
+    fn offset_from_local_datetime(&self, local: &NaiveDateTime) -> MappedLocalTime<FixedOffset> {
+        // skipped times match neither offset, and repeated times match both
+        let matching = [Self::edt(), Self::est()]
+            .into_iter()
+            .filter(|offset| {
+                let utc = *local - Duration::seconds(offset.local_minus_utc().into());
+                self.offset_from_utc_datetime(&utc) == *offset
+            })
+            .collect_vec();
+        match matching[..] {
+            [offset] => MappedLocalTime::Single(offset),
+            [earlier, later] => MappedLocalTime::Ambiguous(earlier, later),
+            _ => MappedLocalTime::None,
+        }
+    }
+
+    fn offset_from_utc_date(&self, utc: &NaiveDate) -> FixedOffset {
+        self.offset_from_utc_datetime(&utc.and_hms_opt(0, 0, 0).unwrap())
+    }
+
+    fn offset_from_utc_datetime(&self, utc: &NaiveDateTime) -> FixedOffset {
+        // 2026-03-08 07:00 and 2026-11-01 06:00 UTC
+        const SPRING_FORWARD: i64 = 1_772_953_200;
+        const FALL_BACK: i64 = 1_793_512_800;
+        if (SPRING_FORWARD..FALL_BACK).contains(&utc.and_utc().timestamp()) {
+            Self::edt()
+        } else {
+            Self::est()
+        }
     }
 }

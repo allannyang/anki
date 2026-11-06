@@ -1,10 +1,14 @@
 // Copyright: Anki Software, LLC and contributors
 // License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
+use std::ops::RangeInclusive;
+
 use chrono::DateTime;
 use chrono::Datelike;
 use chrono::Duration;
 use chrono::FixedOffset;
+use chrono::Offset;
+use chrono::TimeZone;
 use chrono::Timelike;
 
 use crate::prelude::*;
@@ -78,6 +82,48 @@ fn days_elapsed(
 
     // minimum of 0
     days.max(0) as u32
+}
+
+/// Start of each day in `days`, relative to the day containing `now`. Days
+/// start at the rollover hour on the local clock, so they can be 23 or 25
+/// hours long.
+pub(crate) fn day_starts<Tz: TimeZone>(
+    tz: &Tz,
+    now: TimestampSecs,
+    rollover_hour: u8,
+    days: RangeInclusive<i32>,
+) -> Result<Vec<TimestampSecs>> {
+    let rollover_hour = (rollover_hour % 24) as u32;
+    let now = tz
+        .timestamp_opt(now.0, 0)
+        .latest()
+        .or_invalid("invalid timestamp")?;
+    let now_offset_secs = now.offset().fix().local_minus_utc() as i64;
+    let now = now.naive_local();
+    let today = if now.hour() < rollover_hour {
+        now.date() - Duration::days(1)
+    } else {
+        now.date()
+    };
+    days.map(|day| {
+        let start = today
+            .checked_add_signed(Duration::days(day.into()))
+            .or_invalid("day out of range")?
+            .and_hms_opt(rollover_hour, 0, 0)
+            .unwrap();
+        // a rollover skipped by springing forward starts the day an hour later
+        let start_secs = tz
+            .from_local_datetime(&start)
+            .earliest()
+            .or_else(|| {
+                tz.from_local_datetime(&(start + Duration::hours(1)))
+                    .earliest()
+            })
+            .map(|dt| dt.timestamp())
+            .unwrap_or_else(|| start.and_utc().timestamp() - now_offset_secs);
+        Ok(TimestampSecs(start_secs))
+    })
+    .collect()
 }
 
 /// Build a FixedOffset struct, capping minutes_west if out of bounds.
@@ -410,6 +456,59 @@ mod test {
         )
         .unwrap();
         assert_eq!(today.next_day_at.0, next_day_at.timestamp());
+    }
+
+    fn stamp(dt: DateTime<FixedOffset>) -> TimestampSecs {
+        TimestampSecs(dt.timestamp())
+    }
+
+    #[test]
+    fn day_starts_follow_local_clock_across_fall_back() {
+        let (edt, est) = (Eastern2026::edt(), Eastern2026::est());
+        // the evening after clocks fell back on Sunday Nov 1
+        let now = stamp(est.with_ymd_and_hms(2026, 11, 2, 20, 0, 0).unwrap());
+
+        let starts = day_starts(&Eastern2026, now, 6, -2..=0).unwrap();
+
+        // so Saturday Oct 31's day is 25 hours long
+        assert_eq!(
+            starts,
+            vec![
+                stamp(edt.with_ymd_and_hms(2026, 10, 31, 6, 0, 0).unwrap()),
+                stamp(est.with_ymd_and_hms(2026, 11, 1, 6, 0, 0).unwrap()),
+                stamp(est.with_ymd_and_hms(2026, 11, 2, 6, 0, 0).unwrap()),
+            ]
+        );
+    }
+
+    #[test]
+    fn day_starts_use_clock_jump_when_rollover_is_skipped() {
+        let (edt, est) = (Eastern2026::edt(), Eastern2026::est());
+        let now = stamp(edt.with_ymd_and_hms(2026, 3, 9, 12, 0, 0).unwrap());
+
+        let starts = day_starts(&Eastern2026, now, 2, -1..=0).unwrap();
+
+        // 2am never happened on Mar 8, as 2am EST became 3am EDT
+        assert_eq!(
+            starts,
+            vec![
+                stamp(est.with_ymd_and_hms(2026, 3, 8, 2, 0, 0).unwrap()),
+                stamp(edt.with_ymd_and_hms(2026, 3, 9, 2, 0, 0).unwrap()),
+            ]
+        );
+    }
+
+    #[test]
+    fn day_starts_count_from_yesterday_before_rollover() {
+        let est = Eastern2026::est();
+        let now = stamp(est.with_ymd_and_hms(2026, 11, 2, 5, 59, 0).unwrap());
+
+        let starts = day_starts(&Eastern2026, now, 6, 0..=0).unwrap();
+
+        assert_eq!(
+            starts,
+            vec![stamp(est.with_ymd_and_hms(2026, 11, 1, 6, 0, 0).unwrap())]
+        );
     }
 
     #[test]

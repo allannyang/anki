@@ -23,8 +23,20 @@ struct GraphsContext {
     revlog: Vec<RevlogEntry>,
     cards: Vec<Card>,
     next_day_start: TimestampSecs,
+    day_starts: Vec<TimestampSecs>,
     days_elapsed: u32,
     local_offset_secs: i64,
+}
+
+impl GraphsContext {
+    fn day_of(&self, stamp: TimestampSecs) -> i32 {
+        if stamp >= self.next_day_start {
+            // dated in the future by a wrong clock
+            return (stamp.elapsed_secs_since(self.next_day_start) / 86_400) as i32;
+        }
+        let started = self.day_starts.partition_point(|start| *start <= stamp);
+        started as i32 - self.day_starts.len() as i32
+    }
 }
 
 impl Collection {
@@ -55,7 +67,15 @@ impl Collection {
             self.storage
                 .get_revlog_entries_for_searched_cards_after_stamp(revlog_start)?
         };
+        // the extra day covers clock changes
+        let days_back = revlog
+            .iter()
+            .map(|entry| timing.next_day_at.elapsed_secs_since(entry.id.as_secs()) / 86_400 + 1)
+            .max()
+            .unwrap_or_default()
+            .max(0) as i32;
         let ctx = GraphsContext {
+            day_starts: self.day_starts(-days_back..=0)?,
             revlog,
             days_elapsed: timing.days_elapsed,
             cards: self.storage.all_searched_cards()?,

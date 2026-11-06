@@ -20,7 +20,10 @@ pub mod timespan;
 pub mod timing;
 mod upgrade;
 
+use std::ops::RangeInclusive;
+
 use chrono::FixedOffset;
+use chrono::Local;
 pub use reviews::parse_due_date_str;
 use timing::sched_timing_today;
 use timing::SchedTimingToday;
@@ -118,6 +121,27 @@ impl Collection {
         match self.scheduler_version() {
             SchedulerVersion::V1 => Err(AnkiError::SchedulerUpgradeRequired),
             SchedulerVersion::V2 => Ok(self.get_v2_rollover().unwrap_or(4)),
+        }
+    }
+
+    /// Start of each day in `days`, relative to today (eg -1 for yesterday).
+    pub(crate) fn day_starts(&mut self, days: RangeInclusive<i32>) -> Result<Vec<TimestampSecs>> {
+        let today = self.timing_today()?;
+        match self.scheduler_version() {
+            // the v1 scheduler's days are fixed 86,400 second blocks
+            SchedulerVersion::V1 => Ok(days
+                .map(|day| today.next_day_at.adding_secs(86_400 * (i64::from(day) - 1)))
+                .collect()),
+            SchedulerVersion::V2 => {
+                let rollover = self.rollover_for_current_scheduler()?;
+                if self.server {
+                    // the server only knows the user's current UTC offset
+                    let offset = self.local_utc_offset_for_user()?;
+                    timing::day_starts(&offset, today.now, rollover, days)
+                } else {
+                    timing::day_starts(&Local, today.now, rollover, days)
+                }
+            }
         }
     }
 
