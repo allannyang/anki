@@ -57,7 +57,8 @@ impl Rescheduler {
             .collect();
 
         let next_day_at = timing.next_day_at;
-        let reviewed_stats = col.storage.studied_today_by_deck(timing.next_day_at)?;
+        let today_start = col.day_start(0)?;
+        let reviewed_stats = col.storage.studied_today_by_deck(today_start)?;
         let mut reviewed_today_by_preset: HashMap<DeckConfigId, usize> = HashMap::new();
         for (did, count) in reviewed_stats {
             if let Some(&deck_config_id) = &did_to_dcid.get(&did) {

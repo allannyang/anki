@@ -57,7 +57,6 @@ mod test {
     use super::*;
     use crate::prelude::*;
     use crate::revlog::RevlogEntry;
-    use crate::scheduler::timing::day_starts;
 
     fn review_at(dt: DateTime<FixedOffset>) -> RevlogEntry {
         RevlogEntry {
@@ -71,28 +70,14 @@ mod test {
     fn review_counts_keep_early_morning_review_on_its_day_after_clocks_fall_back() {
         let (edt, est) = (Eastern2026::edt(), Eastern2026::est());
         // viewed on the evening clocks fell back
-        let now = TimestampSecs(
-            est.with_ymd_and_hms(2026, 11, 1, 22, 0, 0)
-                .unwrap()
-                .timestamp(),
-        );
-        let ctx = GraphsContext {
-            revlog: vec![
-                review_at(edt.with_ymd_and_hms(2026, 10, 27, 20, 0, 0).unwrap()),
-                // Wednesday's only session, just after the rollover
-                review_at(edt.with_ymd_and_hms(2026, 10, 28, 6, 20, 0).unwrap()),
-                review_at(est.with_ymd_and_hms(2026, 11, 1, 6, 30, 0).unwrap()),
-            ],
-            cards: vec![],
-            next_day_start: TimestampSecs(
-                est.with_ymd_and_hms(2026, 11, 2, 6, 0, 0)
-                    .unwrap()
-                    .timestamp(),
-            ),
-            day_starts: day_starts(&Eastern2026, now, 6, -7..=0).unwrap(),
-            days_elapsed: 0,
-            local_offset_secs: est.local_minus_utc().into(),
-        };
+        let now = est.with_ymd_and_hms(2026, 11, 1, 22, 0, 0).unwrap();
+        let revlog = vec![
+            review_at(edt.with_ymd_and_hms(2026, 10, 27, 20, 0, 0).unwrap()),
+            // Wednesday's only session, just after the rollover
+            review_at(edt.with_ymd_and_hms(2026, 10, 28, 6, 20, 0).unwrap()),
+            review_at(est.with_ymd_and_hms(2026, 11, 1, 6, 30, 0).unwrap()),
+        ];
+        let ctx = GraphsContext::eastern_2026(now, 6, revlog, vec![]);
 
         let counts = ctx.review_counts_and_times().count;
 

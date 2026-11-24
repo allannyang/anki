@@ -14,33 +14,16 @@ impl GraphsContext {
         let mut stats = TrueRetentionStats::default();
 
         // create periods
-        let day = 86400;
         let periods = vec![
-            (
-                "today",
-                self.next_day_start.adding_secs(-day),
-                self.next_day_start,
-            ),
+            ("today", self.start_of_last_days(1), self.next_day_start),
             (
                 "yesterday",
-                self.next_day_start.adding_secs(-2 * day),
-                self.next_day_start.adding_secs(-day),
+                self.start_of_last_days(2),
+                self.start_of_last_days(1),
             ),
-            (
-                "week",
-                self.next_day_start.adding_secs(-7 * day),
-                self.next_day_start,
-            ),
-            (
-                "month",
-                self.next_day_start.adding_secs(-30 * day),
-                self.next_day_start,
-            ),
-            (
-                "year",
-                self.next_day_start.adding_secs(-365 * day),
-                self.next_day_start,
-            ),
+            ("week", self.start_of_last_days(7), self.next_day_start),
+            ("month", self.start_of_last_days(30), self.next_day_start),
+            ("year", self.start_of_last_days(365), self.next_day_start),
             ("all_time", TimestampSecs(0), self.next_day_start),
         ];
 

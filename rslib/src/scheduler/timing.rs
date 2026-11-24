@@ -84,6 +84,10 @@ fn days_elapsed(
     days.max(0) as u32
 }
 
+/// Nothing in a collection predates 1970, so there's no need to work out day
+/// starts further back than this.
+pub(crate) const MAX_DAYS_BACK: u32 = 100 * 365;
+
 /// Start of each day in `days`, relative to the day containing `now`. Days
 /// start at the rollover hour on the local clock, so they can be 23 or 25
 /// hours long.

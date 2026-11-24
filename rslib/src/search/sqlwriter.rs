@@ -22,6 +22,7 @@ use crate::error::Result;
 use crate::notes::field_checksum;
 use crate::notetype::NotetypeId;
 use crate::prelude::*;
+use crate::scheduler::timing::MAX_DAYS_BACK;
 use crate::storage::ids_to_string;
 use crate::storage::ProcessTextFlags;
 use crate::text::glob_matcher;
@@ -339,8 +340,7 @@ impl SqlWriter<'_> {
     }
 
     fn write_rated(&mut self, op: &str, days: i64, ease: &RatingKind) -> Result<()> {
-        // reviews can't predate 1970, so there's no need to look further back
-        let days = days.max(-100 * 365) as i32;
+        let days = days.max(-i64::from(MAX_DAYS_BACK)) as i32;
         let day_starts = self.col.day_starts(days..=days + 1)?;
         let target_cutoff_ms = day_starts[1].as_millis();
         let day_before_cutoff_ms = day_starts[0].as_millis();
@@ -913,8 +913,8 @@ impl SqlWriter<'_> {
     }
 
     fn previous_day_cutoff(&mut self, days_back: u32) -> Result<TimestampSecs> {
-        let timing = self.col.timing_today()?;
-        Ok(timing.next_day_at.adding_secs(-86_400 * days_back as i64))
+        let days_back = days_back.min(MAX_DAYS_BACK) as i32;
+        self.col.day_start(1 - days_back)
     }
 
     fn write_added(&mut self, days: u32) -> Result<()> {
@@ -1263,9 +1263,10 @@ mod test {
 
         // added
         let timing = ctx.timing_today().unwrap();
+        let start_2_days_ago = ctx.day_start(-2).unwrap();
         assert_eq!(
             s(ctx, "added:3").0,
-            format!("(c.id > {})", (timing.next_day_at.0 - (86_400 * 3)) * 1_000)
+            format!("(c.id > {})", start_2_days_ago.0 * 1_000)
         );
         assert_eq!(s(ctx, "added:0").0, s(ctx, "added:1").0,);
 
@@ -1277,7 +1278,7 @@ mod test {
                     "(((SELECT coalesce(min(id) > {cutoff}, false) FROM revlog WHERE cid = c.id AND ease != 0) ",
                     "AND c.id IN (SELECT cid FROM revlog WHERE id > {cutoff})))"
                 ),
-                cutoff = (timing.next_day_at.0 - (86_400 * 3)) * 1_000,
+                cutoff = start_2_days_ago.0 * 1_000,
             )
         );
         assert_eq!(s(ctx, "introduced:0").0, s(ctx, "introduced:1").0,);
@@ -1365,7 +1366,7 @@ mod test {
         );
 
         // rated
-        let yesterday_start = ctx.day_starts(-1..=-1).unwrap()[0];
+        let yesterday_start = ctx.day_start(-1).unwrap();
         assert_eq!(
             s(ctx, "rated:2").0,
             format!(
@@ -1373,7 +1374,7 @@ mod test {
                 yesterday_start.0 * 1_000
             )
         );
-        let start_399_days_ago = ctx.day_starts(-399..=-399).unwrap()[0];
+        let start_399_days_ago = ctx.day_start(-399).unwrap();
         assert_eq!(
             s(ctx, "rated:400:1").0,
             format!(

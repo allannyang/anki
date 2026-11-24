@@ -145,6 +145,11 @@ impl Collection {
         }
     }
 
+    /// Start of `day`, relative to today (eg -1 for yesterday).
+    pub(crate) fn day_start(&mut self, day: i32) -> Result<TimestampSecs> {
+        Ok(self.day_starts(day..=day)?[0])
+    }
+
     pub(crate) fn set_rollover_for_current_scheduler(&mut self, hour: u8) -> Result<()> {
         match self.scheduler_version() {
             SchedulerVersion::V1 => Err(AnkiError::SchedulerUpgradeRequired),

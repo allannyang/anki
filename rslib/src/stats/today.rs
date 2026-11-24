@@ -22,8 +22,8 @@ pub fn studied_today(cards: u32, secs: f32, tr: &I18n) -> String {
 
 impl Collection {
     pub fn studied_today(&mut self) -> Result<String> {
-        let timing = self.timing_today()?;
-        let today = self.storage.studied_today(timing.next_day_at)?;
+        let today_start = self.day_start(0)?;
+        let today = self.storage.studied_today(today_start)?;
         Ok(studied_today(today.cards, today.seconds as f32, &self.tr))
     }
 }

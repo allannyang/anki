@@ -16,18 +16,9 @@ impl GraphsContext {
             all_time: vec![Default::default(); 24],
         };
         let mut conditional_buckets = [
-            (
-                self.next_day_start.adding_secs(-86_400 * 365),
-                &mut data.one_year,
-            ),
-            (
-                self.next_day_start.adding_secs(-86_400 * 90),
-                &mut data.three_months,
-            ),
-            (
-                self.next_day_start.adding_secs(-86_400 * 30),
-                &mut data.one_month,
-            ),
+            (self.start_of_last_days(365), &mut data.one_year),
+            (self.start_of_last_days(90), &mut data.three_months),
+            (self.start_of_last_days(30), &mut data.one_month),
         ];
         'outer: for review in &self.revlog {
             if matches!(

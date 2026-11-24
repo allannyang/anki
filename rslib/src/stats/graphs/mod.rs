@@ -17,6 +17,7 @@ use crate::config::BoolKey;
 use crate::config::Weekday;
 use crate::prelude::*;
 use crate::revlog::RevlogEntry;
+use crate::scheduler::timing::MAX_DAYS_BACK;
 use crate::search::SortMode;
 
 struct GraphsContext {
@@ -36,6 +37,13 @@ impl GraphsContext {
         }
         let started = self.day_starts.partition_point(|start| *start <= stamp);
         started as i32 - self.day_starts.len() as i32
+    }
+
+    /// Start of the period made up of today and the `days - 1` days before it.
+    fn start_of_last_days(&self, days: usize) -> TimestampSecs {
+        // none of our reviews or cards predate the first day we track
+        let first_day = self.day_starts.len().saturating_sub(days.max(1));
+        self.day_starts[first_day]
     }
 }
 
@@ -67,18 +75,21 @@ impl Collection {
             self.storage
                 .get_revlog_entries_for_searched_cards_after_stamp(revlog_start)?
         };
+        let cards = self.storage.all_searched_cards()?;
         // the extra day covers clock changes
         let days_back = revlog
             .iter()
-            .map(|entry| timing.next_day_at.elapsed_secs_since(entry.id.as_secs()) / 86_400 + 1)
+            .map(|entry| entry.id.as_secs())
+            .chain(cards.iter().map(|card| card.id.as_secs()))
+            .map(|stamp| timing.next_day_at.elapsed_secs_since(stamp) / 86_400 + 1)
             .max()
             .unwrap_or_default()
-            .max(0) as i32;
+            .clamp(0, MAX_DAYS_BACK.into()) as i32;
         let ctx = GraphsContext {
             day_starts: self.day_starts(-days_back..=0)?,
             revlog,
             days_elapsed: timing.days_elapsed,
-            cards: self.storage.all_searched_cards()?,
+            cards,
             next_day_start: timing.next_day_at,
             local_offset_secs,
         };
@@ -129,5 +140,37 @@ impl Collection {
         )?;
         self.set_config_bool_inner(BoolKey::FutureDueShowBacklog, prefs.future_due_show_backlog)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use chrono::DateTime;
+    use chrono::FixedOffset;
+
+    use super::*;
+    use crate::scheduler::timing::day_starts;
+
+    impl GraphsContext {
+        /// The past month's graph data, as seen at `now` by a user on Eastern
+        /// time.
+        pub(super) fn eastern_2026(
+            now: DateTime<FixedOffset>,
+            rollover_hour: u8,
+            revlog: Vec<RevlogEntry>,
+            cards: Vec<Card>,
+        ) -> Self {
+            let now_secs = TimestampSecs(now.timestamp());
+            let mut starts = day_starts(&Eastern2026, now_secs, rollover_hour, -30..=1).unwrap();
+            let next_day_start = starts.pop().unwrap();
+            GraphsContext {
+                revlog,
+                cards,
+                next_day_start,
+                day_starts: starts,
+                days_elapsed: 0,
+                local_offset_secs: now.offset().local_minus_utc().into(),
+            }
+        }
     }
 }

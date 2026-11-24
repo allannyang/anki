@@ -16,18 +16,9 @@ impl GraphsContext {
             mature: vec![0; 4],
         };
         let mut conditional_buckets = vec![
-            (
-                self.next_day_start.adding_secs(-86_400 * 365),
-                all_time.clone(),
-            ),
-            (
-                self.next_day_start.adding_secs(-86_400 * 90),
-                all_time.clone(),
-            ),
-            (
-                self.next_day_start.adding_secs(-86_400 * 30),
-                all_time.clone(),
-            ),
+            (self.start_of_last_days(365), all_time.clone()),
+            (self.start_of_last_days(90), all_time.clone()),
+            (self.start_of_last_days(30), all_time.clone()),
         ];
         'outer: for review in &self.revlog {
             let Some(interval_bucket) = interval_bucket(review) else {

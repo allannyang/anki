@@ -179,8 +179,8 @@ impl SqliteStorage {
             .collect()
     }
 
-    pub(crate) fn studied_today(&self, day_cutoff: TimestampSecs) -> Result<StudiedToday> {
-        let start = day_cutoff.adding_secs(-86_400).as_millis();
+    pub(crate) fn studied_today(&self, day_start: TimestampSecs) -> Result<StudiedToday> {
+        let start = day_start.as_millis();
         self.db
             .prepare_cached(include_str!("studied_today.sql"))?
             .query_map(
@@ -203,9 +203,9 @@ impl SqliteStorage {
 
     pub(crate) fn studied_today_by_deck(
         &self,
-        day_cutoff: TimestampSecs,
+        day_start: TimestampSecs,
     ) -> Result<Vec<(DeckId, usize)>> {
-        let start = day_cutoff.adding_secs(-86_400).as_millis();
+        let start = day_start.as_millis();
         self.db
             .prepare_cached(include_str!("studied_today_by_deck.sql"))?
             .query_and_then([start.0], |row| -> Result<_> {
@@ -386,8 +386,7 @@ mod test {
     #[test]
     fn studied_today_counts_reviews_in_window_excluding_manual_and_rescheduled() {
         let storage = create_test_storage();
-        let day_cutoff = TimestampSecs(1_000_000);
-        // window start (in millis) is (1_000_000 - 86_400) * 1000 = 913_600_000
+        let day_start = TimestampSecs(913_600);
         storage
             .add_revlog_entry(&revlog(950_000_000, RevlogReviewKind::Review, 5000), false)
             .unwrap();
@@ -412,7 +411,7 @@ mod test {
             .add_revlog_entry(&revlog(900_000_000, RevlogReviewKind::Review, 9999), false)
             .unwrap();
 
-        let studied = storage.studied_today(day_cutoff).unwrap();
+        let studied = storage.studied_today(day_start).unwrap();
 
         assert_eq!(studied.cards, 2);
         assert_eq!(studied.seconds, 8.0);
@@ -422,7 +421,7 @@ mod test {
     fn studied_today_returns_zero_for_empty_revlog() {
         let storage = create_test_storage();
 
-        let studied = storage.studied_today(TimestampSecs(1_000_000)).unwrap();
+        let studied = storage.studied_today(TimestampSecs(913_600)).unwrap();
 
         assert_eq!(studied.cards, 0);
         assert_eq!(studied.seconds, 0.0);
@@ -475,7 +474,7 @@ mod test {
 
         let mut by_deck: Vec<(i64, usize)> = col
             .storage
-            .studied_today_by_deck(TimestampSecs(1_000_000))
+            .studied_today_by_deck(TimestampSecs(913_600))
             .unwrap()
             .into_iter()
             .map(|(deck, count)| (deck.0, count))
@@ -488,8 +487,8 @@ mod test {
     #[test]
     fn studied_today_by_deck_counts_only_cards_reviewed_after_day_start() {
         let storage = create_test_storage();
-        let day_cutoff = TimestampSecs(1_000_000);
-        let start = 913_600_000;
+        let day_start = TimestampSecs(913_600);
+        let start = day_start.as_millis().0;
         for (id, stamp) in [(1, start - 1), (2, start), (3, start + 1)] {
             let card = Card {
                 id: CardId(id),
@@ -503,7 +502,7 @@ mod test {
         }
 
         assert_eq!(
-            storage.studied_today_by_deck(day_cutoff).unwrap(),
+            storage.studied_today_by_deck(day_start).unwrap(),
             vec![(DeckId(3), 1)]
         );
     }
@@ -541,7 +540,7 @@ mod test {
             };
             assert_eq!(
                 storage
-                    .studied_today_by_deck(TimestampSecs(1_000_000))
+                    .studied_today_by_deck(TimestampSecs(913_600))
                     .unwrap(),
                 expected,
                 "kind {kind:?}, button {button}, factor {factor}"
